@@ -6,3 +6,9 @@ do $$begin
   perform cron.schedule('restaurant-report-reconciliation','* * * * *','select public.reconcile_reports()');
  end if;
 end$$;
+-- Weekly compliance (smoke-test overdue alerts, pest-control weekly flags). Runs with nobody logged in.
+do $$begin
+ if not exists(select 1 from cron.job where jobname='weekly-compliance-checks') then
+  perform cron.schedule('weekly-compliance-checks','*/15 * * * *','select public.run_weekly_checks()');
+ end if;
+end$$;

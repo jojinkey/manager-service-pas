@@ -1,5 +1,5 @@
 import {createClient} from 'npm:@supabase/supabase-js@2';
-import {normalizePhone,validatePin,hashPin,verifyPin,hashActivationCode} from './validation.mjs';
+import {normalizePhone,validatePin,validateNewPin,hashPin,verifyPin,hashActivationCode} from './validation.mjs';
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,x-client-info,apikey,content-type','Access-Control-Allow-Methods':'POST,OPTIONS'};
 const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
 Deno.serve(async(req:Request)=>{
@@ -19,7 +19,7 @@ Deno.serve(async(req:Request)=>{
    userId=data.user.id;
    const {data:profile}=await service.from('profiles').select('phone,active').eq('id',userId).single();
    if(!profile?.active||!profile.phone)return reply({error:'Active phone account required'},403);
-   phone=profile.phone;validatePin(input.current_pin);validatePin(input.new_pin);
+   phone=profile.phone;validatePin(input.current_pin);validateNewPin(input.new_pin);
   }else{phone=normalizePhone(input.phone);validatePin(input.pin)}
   const phoneKey='phone:'+await hashActivationCode(phone);
   const {data:allowed,error:limitError}=await service.rpc('claim_auth_attempt',{p_key:phoneKey,p_limit:8});
@@ -32,6 +32,7 @@ Deno.serve(async(req:Request)=>{
   if(!credentials||!profile?.active||credentials.user_id!==profile.id){await hashPin(action==='change_pin'?input.current_pin:input.pin);return reply({error:'Invalid phone number, PIN or activation code.'},401)}
   if(action==='activate'){
    const code=String(input.activation_code||'').trim();if(code.length>128)return reply({error:'Invalid activation code'},400);
+   validateNewPin(input.pin);
    const pin=await hashPin(input.pin);
    const {error}=await service.rpc('consume_phone_setup',{p_user:profile.id,p_code_hash:await hashActivationCode(code),p_pin_hash:pin.hash,p_salt:pin.salt});
    if(error)return reply({error:'Invalid or expired activation code. Ask your administrator for a new setup code.'},401);

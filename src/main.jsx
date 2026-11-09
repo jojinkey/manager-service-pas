@@ -29,6 +29,8 @@ import {
   SlidersHorizontal,
   X,
   Flag,
+  Flame,
+  Bug,
   UtensilsCrossed,
   Building2,
   ShieldCheck,
@@ -38,8 +40,9 @@ import {
   FileText,
   Info,
 } from "lucide-react";
-import { supabase, signIn, signInPhone, issuePhoneSetup, readTable, rpc, createEmployee } from "./api.mjs";
+import { supabase, signIn, signInPhone, issuePhoneSetup, resetCredentials, readTable, rpc, createEmployee } from "./api.mjs";
 import Employees from "./Employees.jsx";
+import { SmokeTestPage, PestPage, WeeklyStatusStrip } from "./WeeklyChecks.jsx";
 import {
   stateOf,
   resolveWindow,
@@ -93,6 +96,7 @@ function App() {
     [highlights, setHighlights] = useState([]);
   const [scoreSettings,setScoreSettings]=useState([]),[scoreCycles,setScoreCycles]=useState([]),[scoreTotals,setScoreTotals]=useState([]);
   const [scoreAlerts,setScoreAlerts]=useState([]);
+  const [weekly,setWeekly]=useState({smokeTests:[],smokeGaps:[],smokeStatus:[],smokeConfig:null,permissions:[],pestChecks:[],pestFlags:[],pestStatus:[],pestSettings:null});
   const [page, setPage] = useState("overview"),
     [restaurantId, setRestaurantId] = useState("all"),
     [reportType, setReportType] = useState("opening"),
@@ -110,6 +114,9 @@ function App() {
     const timer = setInterval(() => setTick(Date.now()), 30000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (profile && !["admin","manager"].includes(profile.role)) setPage((p) => (p === "smoke" || p === "pest" || p === "account" ? p : "smoke"));
+  }, [profile]);
   const now = new Date(tick),
     date = fmt(now, {
       year: "numeric",
@@ -119,7 +126,8 @@ function App() {
       .split("/")
       .reverse()
       .join("-");
-  const admin = profile?.role === "admin",
+  const limited = !!profile && !["admin","manager"].includes(profile.role),
+    admin = profile?.role === "admin",
     scope = admin ? restaurantId : profile?.restaurant_id,
     visibleRestaurants = restaurants.filter(
       (r) => scope === "all" || r.id === scope,
@@ -136,7 +144,7 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [rs, ps, re, oc, ls, hs, us, ss, sc, st, sa] = await Promise.all(
+      const [rs, ps, re, oc, ls, hs, us, ss, sc, st, sa, smT, smG, smS, smC, perm, peC, peF, peS, peSet] = await Promise.all(
         [
           "restaurants",
           "policies",
@@ -147,6 +155,7 @@ function App() {
           "profiles",
           "score_settings", "score_cycles", "current_score_totals",
           "score_alerts",
+          "smoke_tests","smoke_gaps","smoke_status","smoke_config","role_permissions","pest_checks","pest_flags","pest_status","pest_settings",
         ].map(readTable),
       );
       if (us.find(u=>u.id===profile?.id)?.active===false) {
@@ -165,6 +174,7 @@ function App() {
       );
       setScoreSettings(ss);setScoreCycles(sc);setScoreTotals(st);
       setScoreAlerts(sa.filter(a=>a.active));
+      setWeekly({smokeTests:smT,smokeGaps:smG,smokeStatus:smS,smokeConfig:smC[0]||null,permissions:perm,pestChecks:peC,pestFlags:peF,pestStatus:peS,pestSettings:peSet[0]||null});
       setUsers(us);
       setPolicies(ps);
       setReports(
@@ -435,13 +445,13 @@ function App() {
       <div className="workspace">
         <aside className="sidebar glass">
           <div className="side-main">
-            {[
+            {(limited ? [] : [
               [LayoutDashboard, "overview", "Overview"],
               [ClipboardList, "reports", "Reports"],
               [ChartNoAxesCombined, "performance", "Performance"],
               ...(admin ? [[Users, "employees", "Employees"]] : []),
               ...(admin ? [[Settings, "settings", "Settings"]] : []),
-            ].map(([Icon, key, label]) => (
+            ]).map(([Icon, key, label]) => (
               <button
                 key={key}
                 className={
@@ -561,7 +571,7 @@ function App() {
           )}
           {!!scoreAlerts.length && <ScoreAlertList alerts={scoreAlerts} users={users} restaurants={restaurants} admin={admin} />}
           <nav className="report-tabs" aria-label="Report types">
-            {kinds.map((t) => {
+            {!limited && kinds.map((t) => {
               const I = IconFor[t];
               return (
                 <button
@@ -579,9 +589,20 @@ function App() {
                 </button>
               );
             })}
+            <button className={page === "smoke" ? "selected" : ""} onClick={() => nav("smoke")}>
+              <Flame size={15} />
+              Smoke Test
+              <span className="tab-time">WK</span>
+            </button>
+            <button className={page === "pest" ? "selected" : ""} onClick={() => nav("pest")}>
+              <Bug size={15} />
+              Pest Control
+              <span className="tab-time">WK</span>
+            </button>
           </nav>
-          {page === "overview" && (
+          {page === "overview" && !limited && (
             <>
+              <WeeklyStatusStrip restaurants={visibleRestaurants} smokeStatus={weekly.smokeStatus} pestStatus={weekly.pestStatus} onOpenSmoke={() => nav("smoke")} onOpenPest={() => nav("pest")} />
               <div className="section-toolbar">
                 <div>
                   <h2>
@@ -947,10 +968,16 @@ function App() {
               }}
             />
           )}
+          {page === "smoke" && <SmokeTestPage profile={profile} admin={admin} restaurants={restaurants} scope={scope} data={weekly} reload={load} />}
+          {page === "pest" && <PestPage profile={profile} admin={admin} restaurants={restaurants} scope={scope} data={weekly} reload={load} />}
           {page === "employees" && admin && (
             <Employees
               currentUserId={profile.id}
               onSetup={async(id,phone)=>{const result=await issuePhoneSetup(id,phone);await load();return result}}
+              ledger={ledger}
+              onAdjust={async(id,amount,note)=>{const applied=await rpc('adjust_points',{p_user:id,p_amount:amount,p_note:note});await load();return applied}}
+              onReassign={async(id,restaurant)=>{await rpc('reassign_outlet',{p_user:id,p_restaurant:restaurant});await load()}}
+              onReset={async(id)=>{const result=await resetCredentials(id);await load();return result}}
               onSetActive={async(id,active)=>{await rpc('set_account_active',{p_user:id,p_active:active});await load()}}
               users={users}
               restaurants={restaurants}
@@ -1023,13 +1050,13 @@ function App() {
         </main>
       </div>
       <nav className="bottom-dock glass" aria-label="Workspace navigation">
-        {[
+        {(limited ? [["smoke", "Smoke Test"], ["pest", "Pest Control"]] : [
           ["overview", "Overview"],
           ["reports", "Reports"],
           ["performance", "Performance"],
           ...(admin ? [["employees", "Employees"]] : []),
           ...(admin ? [["settings", "Settings"]] : []),
-        ].map(([key, label]) => (
+        ]).map(([key, label]) => (
           <button
             key={key}
             className={page === key ? "selected" : ""}
@@ -1291,9 +1318,11 @@ function Performance({
                   <td>
                     {l.reason === "submitted"
                       ? "On-time submission"
-                      : "Missed required report"}
+                      : l.reason === "adjustment"
+                        ? "Admin adjustment" + (l.note ? ": " + l.note : "")
+                        : "Missed required report"}
                   </td>
-                  <td>{l.occurrence_id}</td>
+                  <td>{l.occurrence_id || "Manual"}</td>
                   <td>
                     {l.amount > 0 ? "+" : ""}
                     {l.amount}
@@ -2306,18 +2335,8 @@ export function SettingsPage({ policies, restaurants, users, onSave,scoreSetting
                   onChange={(e) => set("end_time", e.target.value)}
                 />
               </Field>
-              <Field label="Points for on-time submission">
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  value={form.reward ?? ""}
-                  placeholder="To be confirmed"
-                  onChange={(e) => set("reward", Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Points deducted for a missed report" hint="Choose zero or more. The actual deduction is capped at the manager's available points, so their score never goes below 0.">
-                <input required type="number" min="0" step="1" value={form.missed_penalty??''} onChange={e=>set('missed_penalty',e.target.value===''?'':Number(e.target.value))}/>
+              <Field label="Points" hint="Fixed for every report: +5 when submitted on time, -20 when missed. Everyone starts each cycle at 200 (maximum 200). A report scores once per business date.">
+                <input readOnly value="+5 on time · −20 missed · start and cap 200" />
               </Field>
               <Field label="Reporting timezone">
                 <select

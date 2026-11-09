@@ -21,11 +21,16 @@ Deno.serve(async(req:Request)=>{
    if(error)return reply({error:error.message},400);
    return reply({activation_code:code,expires_in_hours:24,phone});
   }
+  if(body.action==='reset_credentials'){
+   const {error}=await service.rpc('reset_phone_credentials',{p_actor:actor!.id,p_user:body.user_id,p_hash:codeHash});
+   if(error)return reply({error:error.message},400);
+   return reply({activation_code:code,expires_in_hours:24,must_set_new_pin:true});
+  }
   const input=employeeInput(body),email=crypto.randomUUID()+'@accounts.service.invalid';
   const {data:created,error}=await service.auth.admin.createUser({email,password:makeActivationCode()+makeActivationCode(),email_confirm:true,user_metadata:{full_name:input.name}});
   if(error||!created.user)return reply({error:'Could not create this employee.'},400);
-  const {error:setupError}=await service.rpc('provision_phone_employee',{p_actor:actor!.id,p_user:created.user.id,p_name:input.name,p_email:email,p_restaurant:input.restaurant_id,p_phone:input.phone,p_hash:codeHash});
+  const {error:setupError}=await service.rpc('provision_phone_employee',{p_actor:actor!.id,p_user:created.user.id,p_name:input.name,p_email:email,p_restaurant:input.restaurant_id,p_phone:input.phone,p_hash:codeHash,p_role:input.role});
   if(setupError){await service.auth.admin.deleteUser(created.user.id);return reply({error:'Employee setup failed. Check whether this phone number already has an account.'},400)}
-  return reply({employee:{id:created.user.id,name:input.name,phone:input.phone,restaurant_id:input.restaurant_id,role:'manager'},activation_code:code,expires_in_hours:24});
+  return reply({employee:{id:created.user.id,name:input.name,phone:input.phone,restaurant_id:input.restaurant_id,role:input.role},activation_code:code,expires_in_hours:24});
  }catch(e){return reply({error:e instanceof Error?e.message:'Invalid employee details'},400)}
 });

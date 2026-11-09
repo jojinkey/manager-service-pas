@@ -35,7 +35,8 @@ export async function signIn(email, password) {
   return profile;
 }
 export async function readTable(table) {
-  const order = table==='score_settings'?'restaurant_id':table==='current_score_totals'?'manager_id':'id';
+  const byKey={score_settings:'restaurant_id',current_score_totals:'manager_id',smoke_status:'restaurant_id',pest_status:'restaurant_id',smoke_baselines:'restaurant_id',role_permissions:'role,capability',pest_flags:'restaurant_id,week_start'};
+  const order = byKey[table]||'id';
   return readPages((from,to) => supabase.from(table).select("*").order(order).range(from,to));
 }
 export async function rpc(name, args) {
@@ -72,6 +73,11 @@ export async function signInPhone(phone,pin,activationCode) {
 }
 export async function issuePhoneSetup(user_id,phone) {
  const {data,error}=await supabase.functions.invoke('employee-admin',{body:{action:'issue_setup',user_id,phone}});
+ if(error){let message=error.message;try{message=(await error.context.json()).error||message}catch{}throw Error(message)}
+ if(data?.error)throw Error(data.error);return data;
+}
+export async function resetCredentials(user_id) {
+ const {data,error}=await supabase.functions.invoke('employee-admin',{body:{action:'reset_credentials',user_id}});
  if(error){let message=error.message;try{message=(await error.context.json()).error||message}catch{}throw Error(message)}
  if(data?.error)throw Error(data.error);return data;
 }

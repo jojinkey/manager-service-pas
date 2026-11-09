@@ -9,6 +9,13 @@ export function validatePin(value) {
  if(typeof value!=='string'||!/^\d{4}$/.test(value))throw Error('Choose a PIN with exactly four digits.');
  return value;
 }
+const weakPins=new Set(['0000','1111','2222','3333','4444','5555','6666','7777','8888','9999','1234','4321','2345','3456','4567','5678','6789','0123','1212','2580','1122','1004']);
+// Applies only when choosing a PIN, never at sign-in, so existing users are not locked out.
+export function validateNewPin(value) {
+ validatePin(value);
+ if(weakPins.has(value))throw Error('That PIN is too easy to guess. Choose a different four digits.');
+ return value;
+}
 export function makeActivationCode() {
  return Array.from(crypto.getRandomValues(new Uint8Array(18)),v=>v.toString(16).padStart(2,'0')).join('');
 }

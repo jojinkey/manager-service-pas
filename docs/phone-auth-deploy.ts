@@ -9,6 +9,13 @@ function validatePin(value) {
  if(typeof value!=='string'||!/^\d{4}$/.test(value))throw Error('Choose a PIN with exactly four digits.');
  return value;
 }
+const weakPins=new Set(['0000','1111','2222','3333','4444','5555','6666','7777','8888','9999','1234','4321','2345','3456','4567','5678','6789','0123','1212','2580','1122','1004']);
+// Applies only when choosing a PIN, never at sign-in, so existing users are not locked out.
+function validateNewPin(value) {
+ validatePin(value);
+ if(weakPins.has(value))throw Error('That PIN is too easy to guess. Choose a different four digits.');
+ return value;
+}
 function makeActivationCode() {
  return Array.from(crypto.getRandomValues(new Uint8Array(18)),v=>v.toString(16).padStart(2,'0')).join('');
 }
@@ -48,7 +55,7 @@ Deno.serve(async(req:Request)=>{
    userId=data.user.id;
    const {data:profile}=await service.from('profiles').select('phone,active').eq('id',userId).single();
    if(!profile?.active||!profile.phone)return reply({error:'Active phone account required'},403);
-   phone=profile.phone;validatePin(input.current_pin);validatePin(input.new_pin);
+   phone=profile.phone;validatePin(input.current_pin);validateNewPin(input.new_pin);
   }else{phone=normalizePhone(input.phone);validatePin(input.pin)}
   const phoneKey='phone:'+await hashActivationCode(phone);
   const {data:allowed,error:limitError}=await service.rpc('claim_auth_attempt',{p_key:phoneKey,p_limit:8});
@@ -61,6 +68,7 @@ Deno.serve(async(req:Request)=>{
   if(!credentials||!profile?.active||credentials.user_id!==profile.id){await hashPin(action==='change_pin'?input.current_pin:input.pin);return reply({error:'Invalid phone number, PIN or activation code.'},401)}
   if(action==='activate'){
    const code=String(input.activation_code||'').trim();if(code.length>128)return reply({error:'Invalid activation code'},400);
+   validateNewPin(input.pin);
    const pin=await hashPin(input.pin);
    const {error}=await service.rpc('consume_phone_setup',{p_user:profile.id,p_code_hash:await hashActivationCode(code),p_pin_hash:pin.hash,p_salt:pin.salt});
    if(error)return reply({error:'Invalid or expired activation code. Ask your administrator for a new setup code.'},401);

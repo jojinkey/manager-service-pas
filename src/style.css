@@ -2294,3 +2294,7 @@ input[type="checkbox"] {
 .highlight-note input {
   max-width: 620px;
 }
+.danger-text{color:#b3392f}
+.weekly-strip{margin-bottom:16px}
+.weekly-strip .text-button{text-align:left}
+.reassign-select{max-width:11rem}
