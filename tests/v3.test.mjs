@@ -269,3 +269,34 @@ test('migration 013: every outlet gets four active policies with its manager', a
  await db.exec(sql);
  assert.equal((await db.query("select count(*)::int n from policies where restaurant_id='kampai'")).rows[0].n, 4, 'safe to re-run');
 });
+
+test('migration 014: opening deadline 3:30 pm and one-day extensions', async (tc) => {
+ const db = new PGlite(); tc.after(() => db.close());
+ await db.exec(`create role anon;create role authenticated;create role service_role;
+ create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+ grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;
+ create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid,bucket_id text,name text);alter table storage.objects enable row level security;create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;`);
+ const files = (await readdir('supabase/migrations')).sort();
+ for (const f of files.filter((f) => f < '014')) await db.exec(await readFile('supabase/migrations/' + f, 'utf8'));
+ const A = '11111111-1111-4111-8111-111111111111', M = '22222222-2222-4222-8222-222222222222';
+ await db.query('insert into auth.users values($1),($2)', [A, M]);
+ await db.query("insert into profiles(id,name,role,restaurant_id,active) values($1,'Admin','admin',null,true),($2,'Mgr','manager','kampai',true)", [A, M]);
+ await db.exec(await readFile('supabase/migrations/013_activate_all_policies.sql', 'utf8'));
+ const pol = (await db.query("select id from policies where restaurant_id='kampai' and type='opening' and current")).rows[0].id;
+ const occ = async (date, o, d) => (await db.query("insert into occurrences(restaurant_id,type,business_date,shift,manager_id,policy_id,policy_snapshot,opens_at,deadline) values('kampai','opening',$1,'Morning',$2,$3,'{\"timezone\":\"Asia/Kolkata\"}',clock_timestamp()+($4||' hours')::interval,clock_timestamp()+($5||' hours')::interval) returning id", [date, M, pol, o, d])).rows[0].id;
+ const open = await occ('2041-03-09', '-1', '2'), later = await occ('2041-03-10', '5', '8');
+ await db.exec(await readFile('supabase/migrations/014_opening_deadline_and_day_extensions.sql', 'utf8'));
+ const cur = (await db.query("select start_time::text s,end_time::text e from policies where restaurant_id='kampai' and type='opening' and current")).rows[0];
+ assert.deepEqual(cur, { s: '11:30:00', e: '15:30:00' });
+ const dl = (await db.query("select (deadline at time zone 'Asia/Kolkata')::text d from occurrences where id=$1", [later])).rows[0].d;
+ assert.equal(dl, '2041-03-10 15:30:00', 'pending opening report moves to 3:30 pm');
+ const as = async (id, fn) => { await db.exec('set role authenticated'); await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]); try { return await fn(); } finally { await db.exec('reset role'); } };
+ const ext = (who, id, time) => as(who, () => db.query('select extend_report_deadline($1,$2) r', [id, time]));
+ await assert.rejects(() => ext(M, open, '23:59'), /Administrator/);
+ await ext(A, open, '23:59');
+ const nd = (await db.query("select (deadline at time zone 'Asia/Kolkata')::time::text d from occurrences where id=$1", [open])).rows[0].d;
+ assert.equal(nd, '23:59:00');
+ assert.equal((await db.query("select count(*)::int n from audit_log where action='extend_report_deadline'")).rows[0].n, 1);
+ await db.query("update occurrences set missed_at=clock_timestamp() where id=$1", [later]);
+ await assert.rejects(() => ext(A, later, '23:59'), /already marked missed/);
+});

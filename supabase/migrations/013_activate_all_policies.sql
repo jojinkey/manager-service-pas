@@ -9,7 +9,7 @@ do $$declare r record;t public.report_kind;p public.policies;mgr uuid;ns time;ne
    order by (m.id=(select manager_id from public.policies where restaurant_id=r.id and current and manager_id is not null order by type limit 1)) desc,m.name limit 1;
   if mgr is null then raise notice 'Outlet % has no active manager: policies left switched off',r.id;continue;end if;
   foreach t in array array['opening','closing','incident','briefing']::public.report_kind[] loop
-   if t='opening' then ns:='11:30';ne:='14:30';else ns:='22:30';ne:='11:30';end if;
+   if t='opening' then ns:='11:30';ne:='15:30';else ns:='22:30';ne:='11:30';end if;
    appr:=ok||jsonb_build_object('incident_rule','daily_declaration','handover_rule','previous_service_day');
    select * into p from public.policies where restaurant_id=r.id and type=t and current;
    if p.id is not null and p.enabled and p.manager_id=mgr and p.start_time=ns and p.end_time=ne and p.reward=5 and p.missed_penalty=20 and p.approvals@>appr then continue;end if;

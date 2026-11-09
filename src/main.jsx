@@ -53,6 +53,7 @@ import templates from "./templates.json";
 import { refreshPolicyDraft } from "./policyDraft.mjs";
 import { indiaDate, historyStart, validateRange, inDateRange, summarizeRange } from "./reportingRange.mjs";
 import ScoringSettings from "./ScoringSettings.jsx";
+import DeadlineExtensions from "./DeadlineExtensions.jsx";
 import "./style.css";
 const IconFor = {
   opening: Sun,
@@ -957,6 +958,8 @@ function App() {
               onSaveScoring={async(rid,values)=>{await rpc('configure_scoring',{p_restaurant:rid,p_days:values.days,p_benchmark:values.benchmark});await load();notify('Points settings saved')}}
               onResetPoints={async rid=>{await rpc('reset_points',{p_restaurant:rid});await load();notify('Points cycle started at 0; history kept')}}
               policies={policies}
+              occurrences={occurrences}
+              onExtend={async(id,time)=>{await rpc("extend_report_deadline",{p_occurrence:id,p_time:time});await load();notify("Deadline extended for today")}}
               restaurants={restaurants}
               users={users}
               onSave={async (p) => {
@@ -2255,7 +2258,7 @@ function ReportForm({
     </section>
   );
 }
-export function SettingsPage({ policies, restaurants, users, onSave,scoreSettings=[],scoreCycles=[],onSaveScoring,onResetPoints }) {
+export function SettingsPage({ policies, restaurants, users, onSave,occurrences=[],onExtend,scoreSettings=[],scoreCycles=[],onSaveScoring,onResetPoints }) {
   const [rid, setRid] = useState(restaurants[0]?.id),
     [type, setType] = useState("opening"),
     [draft, setDraft] = useState(() => refreshPolicyDraft(null, rid, "opening", policies)),
@@ -2274,6 +2277,7 @@ export function SettingsPage({ policies, restaurants, users, onSave,scoreSetting
     }));
   return (
     <>
+      <DeadlineExtensions occurrences={occurrences} restaurants={restaurants} onExtend={onExtend} />
       <ScoringSettings key={rid} restaurant={restaurants.find(r=>r.id===rid)} settings={scoreSettings.find(s=>s.restaurant_id===rid)} cycle={scoreCycles.find(c=>c.id===scoreSettings.find(s=>s.restaurant_id===rid)?.current_cycle_id)} onSave={values=>onSaveScoring(rid,values)} onReset={()=>onResetPoints(rid)} />
       <div className="settings-layout">
         <section className="surface settings-panel">
