@@ -2298,3 +2298,23 @@ input[type="checkbox"] {
 .weekly-strip{margin-bottom:16px}
 .weekly-strip .text-button{text-align:left}
 .reassign-select{max-width:11rem}
+
+/* Padded glass panels used by the weekly checks and people pages */
+.pad-panel { padding: 22px 24px; margin-bottom: 20px; box-shadow: 0 8px 30px #5a46300f; }
+.pad-panel .table-scroll { margin-top: 4px; }
+.pad-panel > form + .table-scroll { margin-top: 18px; }
+.pad-panel table, .wrap-table table, .people table { white-space: normal; }
+.pad-panel td, .pad-panel th, .wrap-table td, .wrap-table th, .people td, .people th { vertical-align: top; padding: 10px 12px 10px 0; overflow-wrap: anywhere; }
+.people td:nth-child(n+5) { min-width: 120px; }
+.wrap-table td small, .pad-panel td small { display: block; max-width: 46ch; line-height: 1.5; }
+.pad-panel .field-grid, .field-grid { min-width: 0; }
+.field-grid label { min-width: 0; }
+.field-grid input, .field-grid select, .pad-panel select, .pad-panel input[type=date] { max-width: 100%; min-width: 0; }
+.pad-panel .panel-heading p, .people .panel-heading p { max-width: 70ch; line-height: 1.5; }
+.pad-panel .employee-help { margin: 10px 0 14px; line-height: 1.5; }
+.danger-text { color: #b3392f; }
+.access-confirm { overflow-wrap: anywhere; white-space: normal; }
+@media (max-width: 720px) {
+  .pad-panel { padding: 16px; }
+  .people td:nth-child(n+5) { min-width: 0; }
+}

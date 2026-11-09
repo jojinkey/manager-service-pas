@@ -81,3 +81,8 @@ export async function resetCredentials(user_id) {
  if(error){let message=error.message;try{message=(await error.context.json()).error||message}catch{}throw Error(message)}
  if(data?.error)throw Error(data.error);return data;
 }
+export async function removeEmployee(user_id) {
+ const {data,error}=await supabase.functions.invoke('employee-admin',{body:{action:'remove_employee',user_id}});
+ if(error){let message=error.message;try{message=(await error.context.json()).error||message}catch{}throw Error(message)}
+ if(data?.error)throw Error(data.error);return data;
+}

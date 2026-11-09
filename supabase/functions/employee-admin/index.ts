@@ -21,6 +21,13 @@ Deno.serve(async(req:Request)=>{
    if(error)return reply({error:error.message},400);
    return reply({activation_code:code,expires_in_hours:24,phone});
   }
+  if(body.action==='remove_employee'){
+   const {data:outcome,error}=await service.rpc('remove_employee',{p_actor:actor!.id,p_user:body.user_id});
+   if(error)return reply({error:error.message},400);
+   if(outcome==='deleted')await service.auth.admin.deleteUser(body.user_id);
+   else await service.auth.admin.updateUserById(body.user_id,{ban_duration:'876000h'});
+   return reply({outcome});
+  }
   if(body.action==='reset_credentials'){
    const {error}=await service.rpc('reset_phone_credentials',{p_actor:actor!.id,p_user:body.user_id,p_hash:codeHash});
    if(error)return reply({error:error.message},400);

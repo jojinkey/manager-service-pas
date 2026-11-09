@@ -40,7 +40,7 @@ import {
   FileText,
   Info,
 } from "lucide-react";
-import { supabase, signIn, signInPhone, issuePhoneSetup, resetCredentials, readTable, rpc, createEmployee } from "./api.mjs";
+import { supabase, signIn, signInPhone, issuePhoneSetup, resetCredentials, removeEmployee, readTable, rpc, createEmployee } from "./api.mjs";
 import Employees from "./Employees.jsx";
 import { SmokeTestPage, PestPage, WeeklyStatusStrip } from "./WeeklyChecks.jsx";
 import {
@@ -977,6 +977,7 @@ function App() {
               ledger={ledger}
               onAdjust={async(id,amount,note)=>{const applied=await rpc('adjust_points',{p_user:id,p_amount:amount,p_note:note});await load();return applied}}
               onReassign={async(id,restaurant)=>{await rpc('reassign_outlet',{p_user:id,p_restaurant:restaurant});await load()}}
+              onRemove={async(id)=>{const r=await removeEmployee(id);await load();return r}}
               onReset={async(id)=>{const result=await resetCredentials(id);await load();return result}}
               onSetActive={async(id,active)=>{await rpc('set_account_active',{p_user:id,p_active:active});await load()}}
               users={users}

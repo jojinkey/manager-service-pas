@@ -195,3 +195,55 @@ test('admin can add or deduct a manager points with a recorded reason', async (t
  assert.equal(row.adjusted_by, A); assert.equal(row.note, 'Hygiene breach');
  assert.equal((await db.query("select count(*)::int n from audit_log where action='adjust_points'")).rows[0].n, 3);
 });
+
+test('migration 012: points restart at 200, default windows, employee removal', async (tc) => {
+ const db = new PGlite(); tc.after(() => db.close());
+ await db.exec(`create role anon;create role authenticated;create role service_role;
+ create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+ grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;
+ create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid,bucket_id text,name text);alter table storage.objects enable row level security;create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;`);
+ const files = (await readdir('supabase/migrations')).sort();
+ const before012 = files.filter((f) => f < '012');
+ for (const f of before012) await db.exec(await readFile('supabase/migrations/' + f, 'utf8'));
+ const A = '11111111-1111-4111-8111-111111111111', M = '22222222-2222-4222-8222-222222222222', X = '33333333-3333-4333-8333-333333333333', Y = '44444444-4444-4444-8444-444444444444';
+ await db.query('insert into auth.users values($1),($2),($3),($4)', [A, M, X, Y]);
+ await db.query("insert into profiles(id,name,role,restaurant_id,phone,active) values($1,'Admin','admin',null,null,true),($2,'Mgr','manager','kampai','+919800000001',true),($3,'Fresh','chef','kampai','+919800000002',true),($4,'Used','staff','kampai','+919800000003',true)", [A, M, X, Y]);
+ // existing policies on the old windows + a pending overnight occurrence and one already open
+ const mk = async (type, s, e) => (await db.query("insert into policies(restaurant_id,type,version,enabled,start_time,end_time,timezone,manager_id,reward,missed_penalty,effective_from,operating_days) values('kampai',$1,1,true,$2,$3,'Asia/Kolkata',$4,5,20,current_date,'{0,1,2,3,4,5,6}') returning id", [type, s, e, M])).rows[0].id;
+ const open = await mk('opening', '11:30', '14:33'), clos = await mk('closing', '21:00', '11:30');
+ const occ = async (pol, type, date, off) => (await db.query("insert into occurrences(restaurant_id,type,business_date,shift,manager_id,policy_id,policy_snapshot,opens_at,deadline) values('kampai',$1,$2,'Evening',$3,$4,'{}',clock_timestamp()+($5||' hours')::interval,clock_timestamp()+($5||' hours')::interval+interval '10 hours') returning id", [type, date, M, pol, off])).rows[0].id;
+ const futureOcc = await occ(clos, 'closing', '2041-03-10', '5'), openOcc = await occ(open, 'opening', '2041-03-09', '-1');
+ await db.query("insert into score_ledger(restaurant_id,manager_id,cycle_id,business_date,reason,amount,occurrence_id,policy_id) select 'kampai',$1,current_cycle_id,current_date,'missed',-60,$2,$3 from score_settings where restaurant_id='kampai'", [M, openOcc, open]);
+ const pts = async () => (await db.query('select points from current_score_totals where manager_id=$1', [M])).rows[0].points;
+ assert.equal(await pts(), 140);
+ await db.exec(await readFile('supabase/migrations/012_cycle_restart_default_windows_remove_employee.sql', 'utf8'));
+
+ // 1) points restart
+ assert.equal(await pts(), 200, 'everyone back to 200');
+ assert.equal((await db.query("select count(*)::int n from score_ledger")).rows[0].n, 1, 'ledger history kept');
+ assert.equal((await db.query("select extract(epoch from ends_at-starts_at)/86400 d from score_cycles c join score_settings s on s.current_cycle_id=c.id where s.restaurant_id='kampai'")).rows[0].d, '15.0000000000000000');
+ assert.equal((await db.query("select count(*)::int n from score_alerts where active")).rows[0].n, 0);
+
+ // 2) windows: new versions, only not-yet-open occurrences move, overnight maths holds
+ const cur = (await db.query("select type,start_time::text s,end_time::text e,version from policies where current order by type")).rows;
+ assert.deepEqual(cur, [{ type: 'opening', s: '11:30:00', e: '14:30:00', version: 2 }, { type: 'closing', s: '22:30:00', e: '11:30:00', version: 2 }]);
+ const f = (await db.query("select (opens_at at time zone 'Asia/Kolkata')::text o,(deadline at time zone 'Asia/Kolkata')::text d from occurrences where id=$1", [futureOcc])).rows[0];
+ assert.equal(f.o, '2041-03-10 22:30:00'); assert.equal(f.d, '2041-03-11 11:30:00', 'closing for the 10th ends next morning');
+ const o = (await db.query("select policy_id from occurrences where id=$1", [openOcc])).rows[0];
+ assert.equal(o.policy_id, open, 'already-open report keeps its original window and policy');
+ assert.equal((await db.query("select count(*)::int n from policies where current and restaurant_id='kampai'")).rows[0].n, 2);
+
+ // 3) removal
+ const rm = (who, u) => db.query('select remove_employee($1,$2) r', [who, u]);
+ await assert.rejects(() => rm(M, X), /Administrator/);
+ await assert.rejects(() => rm(A, A), /own account/);
+ assert.equal((await rm(A, X)).rows[0].r, 'deleted');
+ assert.equal((await db.query('select count(*)::int n from profiles where id=$1', [X])).rows[0].n, 0);
+ await db.query("insert into private_pin_credentials(user_id,phone,pin_hash,pin_salt) values($1,'+919800000003',$2,$3)", [Y, 'b'.repeat(64), 's'.repeat(40)]);
+ await db.query("insert into audit_log(actor,action) values($1,'set_initial_pin')", [Y]);
+ assert.equal((await rm(A, Y)).rows[0].r, 'archived');
+ const y = (await db.query('select active,phone,removed_at is not null r,name from profiles where id=$1', [Y])).rows[0];
+ assert.deepEqual(y, { active: false, phone: null, r: true, name: 'Used' });
+ assert.equal((await db.query('select count(*)::int n from private_pin_credentials where user_id=$1', [Y])).rows[0].n, 0);
+ await assert.rejects(() => rm(A, Y), /unavailable/);
+});
