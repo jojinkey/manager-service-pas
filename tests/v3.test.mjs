@@ -247,3 +247,25 @@ test('migration 012: points restart at 200, default windows, employee removal', 
  assert.equal((await db.query('select count(*)::int n from private_pin_credentials where user_id=$1', [Y])).rows[0].n, 0);
  await assert.rejects(() => rm(A, Y), /unavailable/);
 });
+
+test('migration 013: every outlet gets four active policies with its manager', async (tc) => {
+ const db = new PGlite(); tc.after(() => db.close());
+ await db.exec(`create role anon;create role authenticated;create role service_role;
+ create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+ grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;
+ create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid,bucket_id text,name text);alter table storage.objects enable row level security;create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;`);
+ for (const f of (await readdir('supabase/migrations')).sort()) await db.exec(await readFile('supabase/migrations/' + f, 'utf8'));
+ const M = '22222222-2222-4222-8222-222222222222';
+ await db.query('insert into auth.users values($1)', [M]);
+ await db.query("insert into profiles(id,name,role,restaurant_id,active) values($1,'Mgr','manager','kampai',true)", [M]);
+ const sql = await readFile('supabase/migrations/013_activate_all_policies.sql', 'utf8');
+ await db.exec(sql);
+ const k = (await db.query("select type,enabled,manager_id,start_time::text s,end_time::text e,effective_from=public.ist_today() today from policies where restaurant_id='kampai' and current order by type")).rows;
+ assert.equal(k.length, 4);
+ assert.ok(k.every((r) => r.enabled && r.manager_id === M && r.today));
+ assert.equal(k.find((r) => r.type === 'opening').s, '11:30:00');
+ assert.equal(k.find((r) => r.type === 'closing').s, '22:30:00');
+ assert.equal((await db.query("select count(*)::int n from policies where enabled and restaurant_id<>'kampai'")).rows[0].n, 0, 'outlets without a manager stay off');
+ await db.exec(sql);
+ assert.equal((await db.query("select count(*)::int n from policies where restaurant_id='kampai'")).rows[0].n, 4, 'safe to re-run');
+});
